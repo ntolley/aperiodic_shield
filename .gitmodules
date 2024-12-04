@@ -1,0 +1,3 @@
+[submodule "externals/SHIELD_Dynamic_Gating_Analysis"]
+	path = externals/SHIELD_Dynamic_Gating_Analysis
+	url = https://github.com/AllenInstitute/SHIELD_Dynamic_Gating_Analysis
