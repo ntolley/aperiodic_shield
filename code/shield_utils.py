@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
+from scipy import signal
+import xarray as xr
 
 def find_animals(meta_path, roi=['LGd', 'VISp', 'VISl']):
 
@@ -16,6 +18,15 @@ def find_animals(meta_path, roi=['LGd', 'VISp', 'VISl']):
     mice = filtered_df['mouse_id'].unique()
 
     return mice
+
+def downsample(trace, original_fs, target_fs):
+    """Downsample the data with anti-aliasing filter"""
+    nyq = target_fs / 2
+    b, a = signal.butter(4, nyq, fs=original_fs, btype='low')
+    filtered = signal.filtfilt(b, a, trace)
+    down = int(original_fs / target_fs)
+    downsampled = signal.decimate(filtered, down, ftype='fir')
+    return downsampled
 
 def align_lfp(lfp, trial_window, alignment_times, trial_ids = None):
     '''
@@ -45,7 +56,7 @@ def align_lfp(lfp, trial_window, alignment_times, trial_ids = None):
     return ds['aligned_lfp']
 
 
-def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], roi=['LGd', 'VISp', 'VISl']):
+def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srate=500, roi=['LGd', 'VISp', 'VISl']):
 
     """ Inputs:
     subj: subject ID
@@ -101,6 +112,33 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], roi=['LGd
         # align LFP to stimulus presentations
         aligned_lfp = align_lfp(lfp, np.arange(toi[0], toi[1], dt), presentation_times, presentation_ids)
 
+        if down_srate < aligned_lfp.data.shape[-1]-1/toi[1]:
+            # Calculate the new number of time points after downsampling
+            new_time_points = int(down_srate * toi[1] + 1)
+            
+            # Create a new array with the downsampled shape
+            new_data = np.zeros((aligned_lfp.data.shape[0], aligned_lfp.data.shape[1], new_time_points))
+
+            for i, channel_lfp in enumerate(aligned_lfp.data):
+
+                # Downsample the current channel
+                downsampled_channel = downsample(channel_lfp, dynamic_gating_session.probes.sampling_rate[0], down_srate)
+                
+                # Assign the downsampled channel to the new array
+                new_data[i] = downsampled_channel
+        
+            # Replace the DataArray with the new downsampled data
+            aligned_lfp = xr.DataArray(
+                data=new_data,
+                dims=['channel', 'presentation_id', 'time'],
+                coords={
+                    'channel': aligned_lfp.coords['channel'],
+                    'trial': aligned_lfp.coords['presentation_id'],
+                    'time': np.linspace(0, toi[1], int(down_srate * toi[1] + 1))
+                },
+                attrs=aligned_lfp.attrs  # Preserve original attributes if needed
+            )
+        
         # extract lfp in the different brain areas
         lfp_channel_layer = dict()
         for layer, channels in zip(layer_areas_units.keys(), layer_areas_units.values()):
