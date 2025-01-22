@@ -19,6 +19,14 @@ def find_animals(meta_path, roi=['LGd', 'VISp', 'VISl']):
 
     return mice
 
+def get_mice_and_sessions():
+
+    return {
+        
+    }
+
+
+
 def downsample(trace, original_fs, target_fs):
     """Downsample the data with anti-aliasing filter"""
     nyq = target_fs / 2
@@ -51,7 +59,12 @@ def align_lfp(lfp, trial_window, alignment_times, trial_ids = None):
                                       names=('presentation_id', 'time_from_presentation_onset'))
 
     ds = lfp.sel(time = time_selection, method='nearest').to_dataset(name = 'aligned_lfp')
-    ds = ds.assign(time=inds).unstack('time')
+
+    # Create xarray coordinates from the pandas MultiIndex to avoid deprecation break down
+    mindex_coords = xr.Coordinates.from_pandas_multiindex(inds, 'time')
+    
+    # assign new coordinates and unstack
+    ds = ds.assign_coords(mindex_coords).unstack('time')
 
     return ds['aligned_lfp']
 
@@ -63,6 +76,11 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
     session: session ID
     toi: time window of interest (in s) [start_time, end_time]
     """
+
+    # initialize LFP dictionary
+    layer_data = dict()
+
+    print(f'loading session: {session_file}')
 
     nwb_file_asset = pynwb.NWBHDF5IO(f'{data_path}/sub-{subj}/{session_file}', mode='r', load_namespaces=True)
     nwb_file = nwb_file_asset.read()
@@ -100,18 +118,17 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
     flash_end_times = presentation_times + flashes.duration
     presentation_ids = flashes.index.values
 
-    dt = 1/dynamic_gating_session.probes.sampling_rate[0]
+    srate = dynamic_gating_session.probes.sampling_rate.values[0]
+    dt = 1/srate
 
-    # organize LFP for each region/layer in dictionary
-    layer_data = dict()
-
-    # loop over probes
+    # load LFP for each probe
     for pi in probe_index:
         lfp = dynamic_gating_session.get_lfp(pi)
 
         # align LFP to stimulus presentations
         aligned_lfp = align_lfp(lfp, np.arange(toi[0], toi[1], dt), presentation_times, presentation_ids)
 
+        # downsample
         if down_srate < aligned_lfp.data.shape[-1]-1/toi[1]:
             # Calculate the new number of time points after downsampling
             new_time_points = int(down_srate * toi[1] + 1)
@@ -122,7 +139,7 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
             for i, channel_lfp in enumerate(aligned_lfp.data):
 
                 # Downsample the current channel
-                downsampled_channel = downsample(channel_lfp, dynamic_gating_session.probes.sampling_rate[0], down_srate)
+                downsampled_channel = downsample(channel_lfp, srate, down_srate)
                 
                 # Assign the downsampled channel to the new array
                 new_data[i] = downsampled_channel
@@ -147,6 +164,8 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
 
         for layer, channels in lfp_channel_layer.items():
             if channels:  # Only process layers with channels
+                if layer not in layer_data:
+                    layer_data[layer] = []
                 layer_data[layer] = aligned_lfp.sel(channel=channels)
 
     return layer_data
