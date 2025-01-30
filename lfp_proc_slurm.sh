@@ -10,7 +10,7 @@
 #SBATCH -o lfp_proc-%j.out
 #SBATCH -e lfp_proc-%j.out
 
-python l5_optimize_slurm.py $SLURM_ARRAY_TASK_ID
+python l5_proc_slurm.py $SLURM_ARRAY_TASK_ID
 
 scontrol show job $SLURM_JOB_ID >> ${SLURM_JOB_NAME}-${SLURM_JOB_ID}.stats
 sacct -j $SLURM_JOB_ID --format=JobID,JobName,MaxRSS,Elapsed >> ${SLURM_JOB_NAME}-${SLURM_JOB_ID}.stats
