@@ -88,7 +88,7 @@ for session in mice_sess[subj]:
     df['num_licks'] = num_licks
     df['num_rewards'] = num_rewards
     df['num_blinks'] = num_blinks
-    df['pupil_dil'] = num_blinks
+    df['pupil_dil'] = pupil_dil
 
 
     df.to_csv(os.path.join(data_path,'results_behavior',f'behav_{subj}_{session}.csv'))
