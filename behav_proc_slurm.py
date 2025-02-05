@@ -25,6 +25,7 @@ toi = [0, 2]                # time window around flash onset
 mice_sess = load_animals_oi()       # animals of interest
 
 subj_id = int(sys.argv[1])
+print(subj_id, flush=True)
 # current subject (ID from array job)
 subj = list(mice_sess.keys())[subj_id]
 
@@ -35,7 +36,7 @@ ses_files = os.listdir(os.path.join(data_path,f'sub-{subj}'))           # sessio
 # load the sessions that have the ROIs
 for session in mice_sess[subj]:
 
-    print(f'loading session: {session}', flash=True)
+    print(f'loading session: {session}', flush=True)
     ses_file = list(filter(lambda s: session in s, ses_files))
 
     nwb_file_asset = pynwb.NWBHDF5IO(f'{data_path}/sub-{subj}/{ses_file[0]}', mode='r', load_namespaces=True)
@@ -58,6 +59,7 @@ for session in mice_sess[subj]:
     num_licks = np.zeros_like(presentation_times)
     num_rewards = np.zeros_like(presentation_times)
     num_blinks = np.zeros_like(presentation_times)
+    pupil_dil = np.zeros_like(presentation_times)
 
     for i,trial_start in enumerate(presentation_times):
 
@@ -77,11 +79,16 @@ for session in mice_sess[subj]:
         eye_blinks = eye_tracking[eye_tracking['likely_blink']].query('timestamps >= {} and timestamps <= {} '.format(trial_start-toi[0], trial_start+toi[1]))
         num_blinks[i] = len(eye_blinks)
 
+        # dilation
+        eye_trial = eye_tracking.query('timestamps >= {} and timestamps <= {} '.format(trial_start-toi[0], trial_start+toi[1]))
+        pupil_dil[i] = np.mean(eye_trial.pupil_width.values)
+
     df = pd.DataFrame()
     df['mean_speed'] = mean_speed
     df['num_licks'] = num_licks
     df['num_rewards'] = num_rewards
     df['num_blinks'] = num_blinks
+    df['pupil_dil'] = num_blinks
 
 
     df.to_csv(os.path.join(data_path,'results_behavior',f'behav_{subj}_{session}.csv'))
