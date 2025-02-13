@@ -92,14 +92,30 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
     toi: time window of interest (in s) [start_time, end_time]
     """
 
+    print(f'loading session: {session_file}', flush=True)
+
     # initialize LFP dictionary
     layer_data = dict()
 
-    print(f'loading session: {session_file}', flush=True)
-
+    # load session
     nwb_file_asset = pynwb.NWBHDF5IO(f'{data_path}/sub-{subj}/{session_file}', mode='r', load_namespaces=True)
     nwb_file = nwb_file_asset.read()
     dynamic_gating_session = DynamicGatingEcephysSession.from_nwb(nwb_file)
+
+    # get stimulus presentations
+    stim_presentations = dynamic_gating_session.stimulus_presentations
+    flashes = stim_presentations[stim_presentations['stimulus_name'].str.contains('flash')]
+    presentation_times = flashes.start_time.values
+    flash_end_times = presentation_times + flashes.duration
+    presentation_ids = flashes.index.values
+
+    # get sampling rate
+    srate = dynamic_gating_session.probes.sampling_rate.values[0]
+    dt = 1/srate
+
+    # get the channels
+    sess_units = dynamic_gating_session.get_units()
+    chans = dynamic_gating_session.get_channels()
 
     # probe map
     probe_index = dynamic_gating_session.probes.index
@@ -112,36 +128,14 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
     # add the LFP data to the session object
     dynamic_gating_session = DynamicGatingEcephysSession.from_nwb(nwb_file, probe_data_path_map=probe_map)
 
-    # get the channels
-    sess_units = dynamic_gating_session.get_units()
-
-    # find the different layers in the brain area (e.g. VISpl2/3. VISl4, VISpl5)
-
-    areas = np.unique(sess_units.structure_layer.values)
-    area_layers = [name for name in areas if any(r in name for r in roi)]
-
-    # extract layer for each unit
-    layer_areas_units = dict()
-
-    for al in area_layers:
-        layer_areas_units[al] = sess_units[sess_units.structure_layer.str.contains(al)].index
-
-    # get stimulus presentations
-    stim_presentations = dynamic_gating_session.stimulus_presentations
-    flashes = stim_presentations[stim_presentations['stimulus_name'].str.contains('flash')]
-    presentation_times = flashes.start_time.values
-    flash_end_times = presentation_times + flashes.duration
-    presentation_ids = flashes.index.values
-
-    srate = dynamic_gating_session.probes.sampling_rate.values[0]
-    dt = 1/srate
+    area_units = dict()
 
     # load LFP for each probe
     for pi in probe_index:
-        lfp = dynamic_gating_session.get_lfp(pi)
+        probe_lfp = dynamic_gating_session.get_lfp(pi)
 
         # align LFP to stimulus presentations
-        aligned_lfp = align_lfp(lfp, np.arange(toi[0], toi[1], dt), presentation_times, presentation_ids)
+        aligned_lfp = align_lfp(probe_lfp, np.arange(toi[0], toi[1], dt), presentation_times, presentation_ids)
 
         # downsample
         if down_srate < aligned_lfp.data.shape[-1]-1/toi[1]:
@@ -170,18 +164,31 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
                 },
                 attrs=aligned_lfp.attrs  # Preserve original attributes if needed
             )
-        
-        # extract lfp in the different brain areas
-        lfp_channel_layer = dict()
-        for layer, channels in zip(layer_areas_units.keys(), layer_areas_units.values()):
-            lfp_channel_layer[layer] = [chan for chan in aligned_lfp.channel.values if chan in channels]
 
+        # get peak unit on lfp
+        units_on_lfp_chans = sess_units[(sess_units.peak_channel_id.isin(probe_lfp.channel.values)) &
+                                        (sess_units.isi_violations < 0.5) &
+                                        (sess_units.amplitude > 200)]
 
-        for layer, channels in lfp_channel_layer.items():
-            if channels:  # Only process layers with channels
-                if layer not in layer_data:
-                    layer_data[layer] = []
-                layer_data[layer] = aligned_lfp.sel(channel=channels)
+        units_on_lfp_chans = units_on_lfp_chans.merge(chans, left_on='peak_channel_id', right_index=True)
+
+        # loop over areas
+        for r in roi:
+            units = units_on_lfp_chans[units_on_lfp_chans.structure_acronym.str.contains(r)]
+
+            # if units are in area
+            if len(units)>1:
+                unit_id = units.index.values
+                # loop over units
+                for ud in unit_id:
+                    peak_chan_id = units_on_lfp_chans.loc[ud]['peak_channel_id']            # select peak unit
+
+                    lfp_chan = aligned_lfp.sel(channel = peak_chan_id, method='nearest')    # find nearest lfp channel
+
+                    # add to dictionary
+                    struct_lay = units_on_lfp_chans.structure_layer[ud]
+                    layer_data[struct_lay] = dict()
+                    layer_data[struct_lay] = lfp_chan
 
     return layer_data
 
