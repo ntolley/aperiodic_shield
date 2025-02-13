@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import os
 from scipy import signal
 import xarray as xr
+import json
 
 def find_animals(meta_path, roi=['LGd', 'VISp', 'VISl']):
 
@@ -19,11 +20,25 @@ def find_animals(meta_path, roi=['LGd', 'VISp', 'VISl']):
 
     return mice
 
-def get_mice_and_sessions():
+def load_animals_oi():
 
-    return {
-        
-    }
+    # load animals of interest
+
+    with open('session_info.json', 'r') as file:
+        session_info = json.load(file)
+
+
+    # reorganize a bit for ease
+    mice_sess = dict()
+
+    for session in session_info['all_sessions']:
+        mice_sess[session[0:6]] = []
+
+
+    for session in session_info['all_sessions']:
+        mice_sess[session[0:6]].append(session[8:])
+
+    return mice_sess
 
 
 
@@ -80,7 +95,7 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
     # initialize LFP dictionary
     layer_data = dict()
 
-    print(f'loading session: {session_file}')
+    print(f'loading session: {session_file}', flush=True)
 
     nwb_file_asset = pynwb.NWBHDF5IO(f'{data_path}/sub-{subj}/{session_file}', mode='r', load_namespaces=True)
     nwb_file = nwb_file_asset.read()
@@ -169,3 +184,12 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
                 layer_data[layer] = aligned_lfp.sel(channel=channels)
 
     return layer_data
+
+def get_behav_df(subj, data_path, session_file, toi=[0, 1]):
+
+    # load NWB file
+
+    nwb_file_asset = pynwb.NWBHDF5IO(f'{data_path}/sub-{subj}/{session_file}', mode='r', load_namespaces=True)
+    nwb_file = nwb_file_asset.read()
+    dynamic_gating_session = DynamicGatingEcephysSession.from_nwb(nwb_file)
+

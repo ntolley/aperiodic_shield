@@ -84,6 +84,7 @@ for session in mice_sess[subj]:
         pupil_dil[i] = np.mean(eye_trial.pupil_width.values)
 
     df = pd.DataFrame()
+    df['onset_time'] = presentation_times
     df['mean_speed'] = mean_speed
     df['num_licks'] = num_licks
     df['num_rewards'] = num_rewards

@@ -22,8 +22,7 @@ data_path = '/oscar/data/sjones/kduecker/shield_data'
 meta_path = 'externals/SHIELD_Dynamic_Gating_Analysis'
 
 # subj_id from array job
-subj_id = int(sys.argv[1])
-
+subj_id = 1
 
 down_srate = 500            # downsampling
 roi = ['LGd', 'VISp']       # regions of interest
