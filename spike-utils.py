@@ -250,3 +250,175 @@ def add_metadata_to_df(df, metadata, session, subject_id):
     df['subject_id'] = subject_id
     
     return df
+
+def get_session_network_bursts(burst_times, session_onset, session_offset, bin_duration, overlap_threshold, window_size):
+    """
+    Calculate network burst counts and durations using a sliding window approach.
+    
+    Parameters:
+    burst_times (dict): Dictionary mapping unit_id to list of (burst_start, burst_end) tuples
+    session_onset (float): Start time of the session
+    session_offset (float): End time of the session
+    bin_duration (float): Duration of each time bin in seconds
+    overlap_threshold (float): Proportion of units that must burst simultaneously for network burst
+    window_size (int): Number of bins for sliding window
+    
+    Returns:
+    tuple: (network_burst_data DataFrame, network_burst_stats dict, network_burst_periods list)
+    """
+    # Calculate number of bins for the session
+    session_duration = session_offset - session_onset
+    n_bins = int(np.floor(session_duration / bin_duration))
+    n_units = len(burst_times)
+    
+    # Create a 2D array to track bursting status of each unit in each bin
+    burst_activity = np.zeros((n_units, n_bins), dtype=bool)
+    
+    # Fill burst activity matrix
+    for unit_idx, (unit_id, unit_bursts) in enumerate(burst_times.items()):
+        for burst_start, burst_end in unit_bursts:
+            if session_onset <= burst_start < session_offset:
+                # Convert times to bin indices
+                start_bin = min(n_bins - 1, max(0, int((burst_start - session_onset) / bin_duration)))
+                end_bin = min(n_bins - 1, max(0, int((burst_end - session_onset) / bin_duration)))
+                burst_activity[unit_idx, start_bin:end_bin+1] = True
+    
+    # Calculate number of bursting units and proportion in each bin
+    num_bursting_units = np.sum(burst_activity, axis=0)
+    proportion_bursting = num_bursting_units / n_units
+    
+    # Use sliding window to detect network bursts
+    network_bursts = np.zeros(n_bins, dtype=int)
+    
+    for bin_number in range(n_bins):
+        window_start = max(0, bin_number - window_size + 1)
+        window_end = bin_number + 1
+        window_proportion = np.mean(proportion_bursting[window_start:window_end])
+        
+        if window_proportion >= overlap_threshold:
+            network_bursts[bin_number] = 1
+    
+    # Create results DataFrame
+    network_burst_data = pd.DataFrame({
+        'time': np.arange(n_bins) * bin_duration + session_onset,
+        'network_burst': network_bursts,
+        'proportion_bursting': proportion_bursting,
+        'num_bursting_units': num_bursting_units
+    })
+    
+    # Find network burst periods (start and end times)
+    burst_periods = []
+    if len(network_bursts) > 0:
+        # Find indices where bursts start and end
+        burst_changes = np.diff(np.concatenate(([0], network_bursts, [0])))
+        burst_starts = np.where(burst_changes == 1)[0]
+        burst_ends = np.where(burst_changes == -1)[0] - 1
+        
+        # Convert indices to times
+        for start_idx, end_idx in zip(burst_starts, burst_ends):
+            start_time = session_onset + start_idx * bin_duration
+            end_time = session_onset + (end_idx + 1) * bin_duration
+            duration = end_time - start_time
+            burst_periods.append({
+                'start_time': start_time,
+                'end_time': end_time,
+                'duration': duration
+            })
+    
+    # Calculate summary statistics
+    if burst_periods:
+        durations = [period['duration'] for period in burst_periods]
+        mean_duration = np.mean(durations)
+        median_duration = np.median(durations)
+        max_duration = np.max(durations)
+    else:
+        mean_duration = 0
+        median_duration = 0
+        max_duration = 0
+    
+    network_burst_stats = {
+        'total_network_bursts': len(burst_periods),
+        'network_burst_rate': len(burst_periods) / session_duration,
+        'mean_proportion_bursting': proportion_bursting.mean(),
+        'max_proportion_bursting': proportion_bursting.max(),
+        'mean_bursting_units': num_bursting_units.mean(),
+        'max_bursting_units': num_bursting_units.max(),
+        'mean_burst_duration': mean_duration,
+        'median_burst_duration': median_duration,
+        'max_burst_duration': max_duration
+    }
+    
+    return network_burst_data, network_burst_stats, burst_periods
+
+def add_network_burst_counts(df, burst_times_dict, structure_dict, window_duration=1.0,
+                           overlap_threshold=0.02, window_size=1, bin_duration=1.0):
+    """
+    Add network burst counts to an existing DataFrame of neural activity, calculated separately for each structure.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        Existing DataFrame with 'onset_time' and 'structure' columns
+    burst_times_dict : dict
+        Dictionary mapping unit_id to list of (burst_start, burst_end) tuples
+    structure_dict : dict
+        Dictionary mapping unit_id to brain structure
+    window_duration : float, optional
+        Duration of analysis window after stimulus (default: 1.0s)
+    overlap_threshold : float, optional
+        Proportion of units that must burst simultaneously (default: 0.02)
+    window_size : int, optional
+        Number of bins for sliding window (default: 1)
+    bin_duration : float, optional
+        Duration of each time bin in seconds (default: 1.0)
+    
+    Returns:
+    --------
+    pandas.DataFrame
+        Original DataFrame with added 'network_burst_count' column
+    """
+    # Create network_burst_count column
+    network_burst_counts = []
+    
+    # For each unique onset time and structure combination
+    for onset_time in df['onset_time'].unique():
+        window_start = onset_time
+        window_end = onset_time + window_duration
+        
+        # Get rows for this onset time
+        onset_mask = df['onset_time'] == onset_time
+        structures = df[onset_mask]['structure'].unique()
+        
+        for structure in structures:
+            # Get burst times for units in this structure
+            structure_burst_times = {
+                unit_id: bursts 
+                for unit_id, bursts in burst_times_dict.items() 
+                if structure_dict[unit_id] == structure
+            }
+            
+            # Skip if no units in this structure
+            if not structure_burst_times:
+                network_burst_counts.append(0)
+                continue
+                
+            # Calculate network bursts for this window and structure
+            network_burst_data, _, _ = get_session_network_bursts(
+                structure_burst_times,
+                window_start,
+                window_end,
+                bin_duration,
+                overlap_threshold,
+                window_size
+            )
+            
+            # Count network bursts in the window
+            network_burst_count = network_burst_data['network_burst'].sum()
+            
+            # Add the count for this onset time and structure
+            network_burst_counts.append(network_burst_count)
+    
+    # Add the new column to the DataFrame
+    df['network_burst_count'] = network_burst_counts
+    
+    return df
