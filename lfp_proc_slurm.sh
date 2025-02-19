@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J lfp_proc
-#SBATCH -t 30:00
+#SBATCH -t 60:00
 #SBATCH --mem=80G
 #SBATCH --array=0-5
 

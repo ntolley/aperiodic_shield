@@ -190,6 +190,8 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
                     layer_data[struct_lay] = dict()
                     layer_data[struct_lay] = lfp_chan
 
+        layer_data['metadata'] = dynamic_gating_session.metadata
+
     return layer_data
 
 def get_behav_df(subj, data_path, session_file, toi=[0, 1]):
