@@ -116,6 +116,22 @@ if __name__ == "__main__":
 
     mice_sess = load_animals_oi()       # animals of interest
 
+    # Columns of dataframe
+    trial_list = list()
+    subject_id_list = list()
+    session_list = list()
+    mean_speed = list()
+    num_licks = list()
+    num_rewards = list()
+    num_blinks = list()
+    pupil_dil = list()
+    onset_time_list = list()
+    structure_list = list()
+    spike_count_list = list()
+    burst_count_list = list()
+    exponent_list = list()
+    spectra_flat_list = list()
+
     # load the sessions that have the ROIs
     for subj in list(mice_sess.keys()):
         ses_files = os.listdir(os.path.join(data_path,f'sub-{subj}'))
@@ -154,23 +170,7 @@ if __name__ == "__main__":
             # Get burst times
             burst_times_dict = get_burst_times_dict(spike_times_dict, burst_params)
 
-            # Columns of dataframe
-            trial_list = list()
-            subject_id_list = list()
-            session_list = list()
-            mean_speed = list()
-            num_licks = list()
-            num_rewards = list()
-            num_blinks = list()
-            pupil_dil = list()
-            onset_time_list = list()
-            structure_list = list()
-            spike_count_list = list()
-            burst_count_list = list()
-            exponent_list = list()
-            spectra_flat_list = list()
-            
-
+        
             # Iterate over presentation times to get behavior
             for trial, trial_start in enumerate(presentation_times):
                 # mean running speed

@@ -186,7 +186,8 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
                     lfp_chan = aligned_lfp.sel(channel = peak_chan_id, method='nearest')    # find nearest lfp channel
 
                     # add to dictionary
-                    struct_lay = units_on_lfp_chans.structure_layer[ud]
+                    # struct_lay = units_on_lfp_chans.structure_layer[ud]
+                    struct_lay = units_on_lfp_chans.structure_acronym[ud]
                     layer_data[struct_lay] = dict()
                     layer_data[struct_lay] = lfp_chan
 
