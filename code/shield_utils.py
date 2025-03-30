@@ -128,68 +128,76 @@ def get_lfp_dict(subj, data_path, lfp_files, session_file, toi=[0, 1], down_srat
     # add the LFP data to the session object
     dynamic_gating_session = DynamicGatingEcephysSession.from_nwb(nwb_file, probe_data_path_map=probe_map)
 
-    area_units = dict()
-
     # load LFP for each probe
     for pi in probe_index:
         probe_lfp = dynamic_gating_session.get_lfp(pi)
 
-        # align LFP to stimulus presentations
-        aligned_lfp = align_lfp(probe_lfp, np.arange(toi[0], toi[1], dt), presentation_times, presentation_ids)
+        structs = chans.loc[probe_lfp.channel.values].structure_acronym.unique()
+        has_roi = bool(set(roi) & set(structs))
 
-        # downsample
-        if down_srate < aligned_lfp.data.shape[-1]-1/toi[1]:
-            # Calculate the new number of time points after downsampling
-            new_time_points = int(down_srate * toi[1] + 1)
-            
-            # Create a new array with the downsampled shape
-            new_data = np.zeros((aligned_lfp.data.shape[0], aligned_lfp.data.shape[1], new_time_points))
-
-            for i, channel_lfp in enumerate(aligned_lfp.data):
-
-                # Downsample the current channel
-                downsampled_channel = downsample(channel_lfp, srate, down_srate)
-                
-                # Assign the downsampled channel to the new array
-                new_data[i] = downsampled_channel
+        # add this probe to layer_data if it has at least one of the areas
+        if has_roi:
+            layer_data[f'probe {str(pi)}'] = dict()
         
-            # Replace the DataArray with the new downsampled data
-            aligned_lfp = xr.DataArray(
-                data=new_data,
-                dims=['channel', 'presentation_id', 'time'],
-                coords={
-                    'channel': aligned_lfp.coords['channel'],
-                    'trial': aligned_lfp.coords['presentation_id'],
-                    'time': np.linspace(0, toi[1], int(down_srate * toi[1] + 1))
-                },
-                attrs=aligned_lfp.attrs  # Preserve original attributes if needed
-            )
+            for r in roi:
 
-        # get peak unit on lfp
-        units_on_lfp_chans = sess_units[(sess_units.peak_channel_id.isin(probe_lfp.channel.values)) &
-                                        (sess_units.isi_violations < 0.5) &
-                                        (sess_units.amplitude > 200)]
+                    # some probes have both areas, some only 1
+                    if r in structs:
+                        print(f'found chan for {r} on probe {pi}')
 
-        units_on_lfp_chans = units_on_lfp_chans.merge(chans, left_on='peak_channel_id', right_index=True)
+                        probe_lfp = dynamic_gating_session.get_lfp(pi)
 
-        # loop over areas
-        for r in roi:
-            units = units_on_lfp_chans[units_on_lfp_chans.structure_acronym.str.contains(r)]
+                        # Get channels in the current probe as integers
+                        probe_channels = probe_lfp.channel.values.astype(int)
 
-            # if units are in area
-            if len(units)>1:
-                unit_id = units.index.values
-                # loop over units
-                for ud in unit_id:
-                    peak_chan_id = units_on_lfp_chans.loc[ud]['peak_channel_id']            # select peak unit
+                        # Filter channels that are both:
+                        # 1. In the current probe (probe_channels)
+                        # 2. Have the target structure acronym (r)
 
-                    lfp_chan = aligned_lfp.sel(channel = peak_chan_id, method='nearest')    # find nearest lfp channel
+                        mask = (
+                            chans.index.astype(int).isin(probe_channels) &  # Check channel is in probe
+                            (chans['structure_acronym'] == r)               # Check structure matches
+                        )
 
-                    # add to dictionary
-                    # struct_lay = units_on_lfp_chans.structure_layer[ud]
-                    struct_lay = units_on_lfp_chans.structure_acronym[ud]
-                    layer_data[struct_lay] = dict()
-                    layer_data[struct_lay] = lfp_chan
+                        valid_channels = chans[mask].index.astype(int)
+
+                        # Convert to numpy array and ensure alignment with xarray's channel values
+                        valid_channels_np = probe_lfp.channel.values[np.isin(probe_lfp.channel.values, valid_channels)]
+
+                        lfp_roi = probe_lfp.sel(channel=valid_channels_np)
+
+                        # align LFP to stimulus presentations
+                        aligned_lfp = align_lfp(lfp_roi, np.arange(toi[0], toi[1], dt), presentation_times, presentation_ids)
+
+                        # downsample
+                        if down_srate < aligned_lfp.data.shape[-1]-1/toi[1]:
+                            # Calculate the new number of time points after downsampling
+                            new_time_points = int(down_srate * toi[1] + 1)
+                            
+                            # Create a new array with the downsampled shape
+                            new_data = np.zeros((aligned_lfp.data.shape[0], aligned_lfp.data.shape[1], new_time_points))
+
+                            for i, channel_lfp in enumerate(aligned_lfp.data):
+
+                                # Downsample the current channel
+                                downsampled_channel = downsample(channel_lfp, srate, down_srate)
+                                
+                                # Assign the downsampled channel to the new array
+                                new_data[i] = downsampled_channel
+
+                            # Replace the DataArray with the new downsampled data
+                            aligned_lfp = xr.DataArray(
+                                data=new_data,
+                                dims=['channel', 'presentation_id', 'time'],
+                                coords={
+                                    'channel': aligned_lfp.coords['channel'],
+                                    'trial': aligned_lfp.coords['presentation_id'],
+                                    'time': np.linspace(0, toi[1], int(down_srate * toi[1] + 1))
+                                },
+                                attrs=aligned_lfp.attrs  # Preserve original attributes if needed
+                                )
+
+                        layer_data[f'probe {str(pi)}'][r] = aligned_lfp.mean(dim='channel')
 
         layer_data['metadata'] = dynamic_gating_session.metadata
 
