@@ -249,6 +249,8 @@ if __name__ == "__main__":
                         tfr, tfr_freqs = compute_tfr(lfp_epochs, FS_LFP, FREQS, method='morlet', 
                                                         n_morlet_cycle=N_CYCLES, n_jobs=N_JOBS)
 
+                        print(f'TFR Shape: {tfr.shape}')
+
                         tfr = np.mean(tfr, axis=0) # average over channels
                         tfr = np.mean(tfr, axis=2)
                         # parameterize spectra, compute aperiodic exponent and total power
@@ -267,7 +269,7 @@ if __name__ == "__main__":
                             specparam_error_list.append(res.error_)
                         plt.close('all')
 
-                        # print(f'Num Null: {sgm.n_null_}')
+                        print(f'Num Null: {sgm.n_null_}')
                         exponent = sgm.get_params('aperiodic', 'exponent')
                         exponent_list.extend(exponent.squeeze())
 
