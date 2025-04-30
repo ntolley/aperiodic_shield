@@ -104,6 +104,8 @@ if __name__ == "__main__":
     # spectrogram hyperparameters
     FREQS = [10, 100, 128] # [start, stop, n_freqs] (Hz)
     N_CYCLES = 5 # for Morlet decomp
+    specparam_min_freq = 4
+    specparam_max_freq = 200
 
     # SpecParam hyperparameters
     SPECPARAM_SETTINGS = {
@@ -111,7 +113,9 @@ if __name__ == "__main__":
         'min_peak_height'   :   0, # default : 0
         'max_n_peaks'       :   4, # default : inf
         'peak_threshold'    :   3, # default : 2.0
-        'aperiodic_mode'    :   'knee'} # 'fixed' or 'knee'
+        # 'aperiodic_mode'    :   'knee'
+        'aperiodic_mode'    :   'fixed'
+        } # 'fixed' or 'knee'
     N_JOBS = 20 # number of jobs for parallel processing
 
     mice_sess = load_animals_oi()       # animals of interest
@@ -131,6 +135,10 @@ if __name__ == "__main__":
     burst_count_list = list()
     exponent_list = list()
     spectra_flat_list = list()
+    freqs_list = list()
+    specparam_r_squared_list = list()
+    specparam_error_list = list()
+    spectra_original_list = list()
 
     # load the sessions that have the ROIs
     for subj in list(mice_sess.keys()):
@@ -138,6 +146,7 @@ if __name__ == "__main__":
         print(f'Subject {subj}')
 
         for session in mice_sess[subj]:
+            print('------------------------------------')
             print(f'loading session: {session}', flush=True)
             ses_file = list(filter(lambda s: session in s, ses_files))
 
@@ -166,6 +175,10 @@ if __name__ == "__main__":
             # Get good units with structure info
             good_units_visual, spike_times_dict, structure_dict = get_good_units_with_structure(dynamic_gating_session)
             unique_structures = set(structure_dict.values())
+            print(f'All unique structures: {list(unique_structures)}')
+            for probe_key in lfp_dict.keys():
+                if probe_key != 'metadata':
+                    print(f'{probe_key} keys: {list(lfp_dict[probe_key].keys())}')
             
             # Get burst times
             burst_times_dict = get_burst_times_dict(spike_times_dict, burst_params)
@@ -225,32 +238,63 @@ if __name__ == "__main__":
                     session_list.append(session)
 
             for structure in unique_structures:
+                has_struct = False
                 # Extract specparams features
-                if structure in lfp_dict.keys():
-                    lfp_epochs = lfp_dict[structure]
-                    lfp_epochs = np.expand_dims(lfp_epochs, 0)
+                for probe_name in lfp_dict.keys():
+                    if (structure in lfp_dict[probe_name].keys()) and (probe_name != 'metadata'):
+                        lfp_epochs = lfp_dict[probe_name][structure]
+                        lfp_epochs = np.expand_dims(lfp_epochs, 0)
 
-                    # compute tfr
-                    tfr, tfr_freqs = compute_tfr(lfp_epochs, FS_LFP, FREQS, method='morlet', 
-                                                    n_morlet_cycle=N_CYCLES, n_jobs=N_JOBS)
+                        # compute tfr
+                        tfr, tfr_freqs = compute_tfr(lfp_epochs, FS_LFP, FREQS, method='morlet', 
+                                                        n_morlet_cycle=N_CYCLES, n_jobs=N_JOBS)
 
-                    tfr = np.mean(tfr, axis=0) # average over channels
-                    tfr = np.mean(tfr, axis=2)
-                    # parameterize spectra, compute aperiodic exponent and total power
-                    sgm = apply_specparam(tfr[None,:,:], tfr_freqs, SPECPARAM_SETTINGS, N_JOBS)
-                    exponent = sgm.get_params('aperiodic', 'exponent')
-                    exponent_list.extend(exponent.squeeze())
+                        tfr = np.mean(tfr, axis=0) # average over channels
+                        tfr = np.mean(tfr, axis=2)
+                        # parameterize spectra, compute aperiodic exponent and total power
+                        freq_filter = np.logical_and(tfr_freqs >= specparam_min_freq, tfr_freqs <= specparam_max_freq)
+                        sgm = apply_specparam(tfr[None,:,freq_filter], tfr_freqs[freq_filter], SPECPARAM_SETTINGS, N_JOBS)
+                        
+                        figure_dir_name = f'figures/specparam_plots/{subj}_{session}_{probe_name}_{structure}/'
+                        os.makedirs(figure_dir_name, exist_ok=True)
 
-                    spectra_flat = compute_flattened_spectra(sgm)
-                    spectra_flat = [spectra_flat[idx, :] for idx in range(spectra_flat.shape[0])]
-                    spectra_flat_list.extend(spectra_flat)
-                else:
+                        sgm.plot(save_fig=True, file_name='r2_plot', file_path=figure_dir_name)
+
+                        for idx in range(len(presentation_times)):
+                            res = sgm.get_model(idx)
+                            res.plot(plt_log=True, save_fig=True, file_name=f'trial_{idx}_spectrum', file_path=figure_dir_name)
+                            specparam_r_squared_list.append(res.r_squared_)
+                            specparam_error_list.append(res.error_)
+                        plt.close('all')
+
+                        # print(f'Num Null: {sgm.n_null_}')
+                        exponent = sgm.get_params('aperiodic', 'exponent')
+                        exponent_list.extend(exponent.squeeze())
+
+                        spectra_flat = compute_flattened_spectra(sgm)
+                        spectra_flat = [spectra_flat[idx, :] for idx in range(spectra_flat.shape[0])]
+                        spectra_flat_list.extend(spectra_flat)
+
+                        spectra_original = [tfr[idx, :] for idx in range(tfr.shape[0])]
+                        spectra_original_list.extend(spectra_original)
+
+                        freqs_trials = [tfr_freqs[freq_filter] for _ in range(len(spectra_flat))]
+                        freqs_list.extend(freqs_trials)
+                        has_struct = True
+
+                        break # exit for loop over probes once ROI is found
+                
+                if not has_struct:
+                    print(f'{structure} not found in subj_{subj} session_{session}')
                     exponent_list.extend(np.repeat(np.nan, len(presentation_times)))
                     spectra_flat_list.extend(np.repeat(np.nan, len(presentation_times)))
+                    freqs_list.extend(np.repeat(np.nan, len(presentation_times)))
+                    spectra_original_list.extend(np.repeat(np.nan, len(presentation_times)))
+                    specparam_r_squared_list.extend(np.repeat(np.nan, len(presentation_times)))
+                    specparam_error_list.extend(np.repeat(np.nan, len(presentation_times)))
 
-
-        #     break
-        # break
+        print(' ')
+        print(' ')
 
     df_dict = {
         'trial': trial_list,
@@ -266,8 +310,15 @@ if __name__ == "__main__":
         'spike_count': spike_count_list,
         'burst_count': burst_count_list,
         'exponent': exponent_list,
-        'spectra_flat': spectra_flat_list
+        'spectra_flat': spectra_flat_list,
+        'spectra_original': spectra_original_list,
+        'freqs': freqs_list,
+        'specparam_r_squared': specparam_r_squared_list,
+        'specparam_error': specparam_error_list
     }
+
+    for key, value in df_dict.items():
+        print(f'{key}: {len(value)}')
     df = pd.DataFrame(df_dict)
 
     df.to_csv('all_features.csv')
