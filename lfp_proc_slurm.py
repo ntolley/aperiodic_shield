@@ -42,7 +42,7 @@ lfp_files = list(filter(lambda s: 'None' in s, ses_files))
 for session in mice_sess[subj]:
     ses_file = list(filter(lambda s: session in s, ses_files))
 
-    layer_lfp = get_lfp_dict(subj, data_path, lfp_files, ses_file[0], toi, down_srate, roi)         # align and downsample LFP
+    layer_lfp = get_lfp_dict(subj, data_path, lfp_files, ses_file, toi, down_srate, roi)         # align and downsample LFP
 
     with open(os.path.join(data_path,'results_lfp_layer', f'lfp_{subj}_{session}.pkl'), 'wb') as f:
         pickle.dump(layer_lfp, f)
