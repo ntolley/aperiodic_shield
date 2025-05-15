@@ -131,7 +131,7 @@ def plot_tfr(time, freqs, tfr, fname_out=None, title=None,
 
 def compute_tfr(lfp, fs, freqs, freq_spacing='lin', time_window_length=0.5, 
                 freq_bandwidth=4, n_jobs=-1, decim=1, output='power', 
-                method='multitaper', n_morlet_cycle=7, verbose=False):
+                method='stockwell', stockwell_width = 1, n_morlet_cycle=7, verbose=False):
     """
     Compute time-frequency representation (TFR) of LFP data.
 
@@ -146,7 +146,7 @@ def compute_tfr(lfp, fs, freqs, freq_spacing='lin', time_window_length=0.5,
     """
 
     # imports
-    from mne.time_frequency import tfr_array_multitaper, tfr_array_morlet
+    from mne.time_frequency import tfr_array_multitaper, tfr_array_morlet, tfr_array_stockwell
 
     # define hyperparameters
     if freq_spacing == 'lin':
@@ -165,6 +165,12 @@ def compute_tfr(lfp, fs, freqs, freq_spacing='lin', time_window_length=0.5,
         tfr = tfr_array_morlet(lfp, sfreq=fs, freqs=freq, n_cycles=n_morlet_cycle, 
                                output=output, n_jobs=n_jobs, decim=decim, 
                                verbose=verbose)
+    
+    elif method == 'stockwell':
+        tfr, _, freq = tfr_array_stockwell(lfp, sfreq=fs, fmin=freq[0], fmax=freq[-1], 
+                                  n_fft=int(2048*fs/1000), width=stockwell_width, decim=decim, 
+                                  return_itc=False, n_jobs=n_jobs, verbose=verbose)
+
     return tfr, freq
 
 
