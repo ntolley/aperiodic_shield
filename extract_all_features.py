@@ -1,7 +1,6 @@
 # packages
 import pynwb
 from allensdk.brain_observatory.ecephys.dynamic_gating_ecephys_session import DynamicGatingEcephysSession
-from spike_utils import get_good_units_with_structure, maxInterval, get_burst_times_dict, count_bursts_and_spikes_after_stim, add_metadata_to_df
 
 import numpy as np
 import pandas as pd
@@ -16,9 +15,15 @@ from pathlib import Path
 import pandas as pd
 import glob
 
+
+
 # Add the path you want to include
-sys.path.append('code')
+import sys
+sys.path.append('utils')
+
 # load custom scripts
+from spike_utils import get_good_units_with_structure, maxInterval, get_burst_times_dict, count_bursts_and_spikes_after_stim, add_metadata_to_df
+
 from shield_utils import find_animals, get_lfp_dict, downsample, align_lfp, load_animals_oi
 from tfr_utils import compute_tfr
 
@@ -82,9 +87,10 @@ def compute_flattened_spectra(sgm):
 if __name__ == "__main__":
     data_path = '/oscar/data/sjones/kduecker/shield_data/'
     meta_path = 'externals/SHIELD_Dynamic_Gating_Analysis'
-    save_path = '/oscar/data/sjones/ntolley/shield_data'
-    lfp_data_path = '/oscar/data/sjones/ntolley/shield_data/results_lfp_layer'
+    save_path = '/oscar/data/sjones/kduecker/shield_data/'
+    lfp_data_path = '/oscar/data/sjones/kduecker/shield_data/results_lfp_layer'
 
+    unique_structures = ['LGd', 'VISp']
 
     toi = [0, 2]                # time window around flash onset
 
@@ -100,19 +106,19 @@ if __name__ == "__main__":
         'pre_burst_silence': 0.1  # 100 ms
     }
 
-    FS_LFP = 1250 # approximate sampling frequency for LFP
+    FS_LFP = 500 # downsampled frequency for LFP
     # spectrogram hyperparameters
-    FREQS = [10, 100, 128] # [start, stop, n_freqs] (Hz)
+    FREQS = [2, 100, 98] # [start, stop, n_freqs] (Hz)
     N_CYCLES = 5 # for Morlet decomp
-    specparam_min_freq = 4
-    specparam_max_freq = 200
+    specparam_min_freq = 2
+    specparam_max_freq = 100
 
     # SpecParam hyperparameters
     SPECPARAM_SETTINGS = {
-        'peak_width_limits' :   [2, 20], # default : (0.5, 12.0) - recommends at least frequency resolution * 2
+        'peak_width_limits' :   [0.1, 12.0], #[2, 20], # default : (0.5, 12.0) - recommends at least frequency resolution * 2
         'min_peak_height'   :   0, # default : 0
-        'max_n_peaks'       :   4, # default : inf
-        'peak_threshold'    :   3, # default : 2.0
+        'max_n_peaks'       :   10, # default : inf
+        'peak_threshold'    :   1., # default : 2.0
         # 'aperiodic_mode'    :   'knee'
         'aperiodic_mode'    :   'fixed'
         } # 'fixed' or 'knee'
@@ -174,11 +180,13 @@ if __name__ == "__main__":
 
             # Get good units with structure info
             good_units_visual, spike_times_dict, structure_dict = get_good_units_with_structure(dynamic_gating_session)
-            unique_structures = set(structure_dict.values())
+
+            # KD: shouldn't we just extract the structures we need? (moved to top)
+            # unique_structures = ['LGd', 'VISp']  #set(structure_dict.values())
             print(f'All unique structures: {list(unique_structures)}')
-            for probe_key in lfp_dict.keys():
-                if probe_key != 'metadata':
-                    print(f'{probe_key} keys: {list(lfp_dict[probe_key].keys())}')
+            for struct_key in lfp_dict.keys():
+                if struct_key != 'metadata':
+                    print(f'{struct_key} keys: {list(lfp_dict[struct_key].keys())}')
             
             # Get burst times
             burst_times_dict = get_burst_times_dict(spike_times_dict, burst_params)
@@ -237,63 +245,73 @@ if __name__ == "__main__":
                     subject_id_list.append(subject_id)
                     session_list.append(session)
 
+            print('Loading LFP data', flush=True)
+            with open(os.path.join(data_path,'results_lfp_layer', f'lfp_{subj}_{session}.pkl'), 'rb') as f:
+                    lfp = pickle.load(f)
+
             for structure in unique_structures:
-                has_struct = False
-                # Extract specparams features
-                for probe_name in lfp_dict.keys():
-                    if (structure in lfp_dict[probe_name].keys()) and (probe_name != 'metadata'):
-                        lfp_epochs = lfp_dict[probe_name][structure]
-                        lfp_epochs = np.expand_dims(lfp_epochs, 0)
-
-                        # compute tfr
-                        tfr, tfr_freqs = compute_tfr(lfp_epochs, FS_LFP, FREQS, method='morlet', 
-                                                        n_morlet_cycle=N_CYCLES, n_jobs=N_JOBS)
-
-                        print(f'TFR Shape: {tfr.shape}')
-
-                        tfr = np.mean(tfr, axis=0) # average over channels
-                        tfr = np.mean(tfr, axis=2)
-                        # parameterize spectra, compute aperiodic exponent and total power
-                        freq_filter = np.logical_and(tfr_freqs >= specparam_min_freq, tfr_freqs <= specparam_max_freq)
-                        sgm = apply_specparam(tfr[None,:,freq_filter], tfr_freqs[freq_filter], SPECPARAM_SETTINGS, N_JOBS)
-                        
-                        figure_dir_name = f'figures/specparam_plots/{subj}_{session}_{probe_name}_{structure}/'
-                        os.makedirs(figure_dir_name, exist_ok=True)
-
-                        sgm.plot(save_fig=True, file_name='r2_plot', file_path=figure_dir_name)
-
-                        for idx in range(len(presentation_times)):
-                            res = sgm.get_model(idx)
-                            res.plot(plt_log=True, save_fig=True, file_name=f'trial_{idx}_spectrum', file_path=figure_dir_name)
-                            specparam_r_squared_list.append(res.r_squared_)
-                            specparam_error_list.append(res.error_)
-                        plt.close('all')
-
-                        print(f'Num Null: {sgm.n_null_}')
-                        exponent = sgm.get_params('aperiodic', 'exponent')
-                        exponent_list.extend(exponent.squeeze())
-
-                        spectra_flat = compute_flattened_spectra(sgm)
-                        spectra_flat = [spectra_flat[idx, :] for idx in range(spectra_flat.shape[0])]
-                        spectra_flat_list.extend(spectra_flat)
-
-                        spectra_original = [tfr[idx, :] for idx in range(tfr.shape[0])]
-                        spectra_original_list.extend(spectra_original)
-
-                        freqs_trials = [tfr_freqs[freq_filter] for _ in range(len(spectra_flat))]
-                        freqs_list.extend(freqs_trials)
-                        has_struct = True
-
-                        break # exit for loop over probes once ROI is found
                 
-                if not has_struct:
-                    print(f'{structure} not found in subj_{subj} session_{session}')
-                    exponent_list.extend(np.repeat(np.nan, len(presentation_times)))
-                    spectra_flat_list.extend(np.repeat(np.nan, len(presentation_times)))
-                    freqs_list.extend(np.repeat(np.nan, len(presentation_times)))
-                    spectra_original_list.extend(np.repeat(np.nan, len(presentation_times)))
-                    specparam_r_squared_list.extend(np.repeat(np.nan, len(presentation_times)))
-                    specparam_error_list.extend(np.repeat(np.nan, len(presentation_times)))
+                # concatenate probes recording from same structure into 3d arrays
+                probe_names = sorted(lfp[structure].keys())
+
+                # Expand each DataArray to include the "probe" dimension and assign coordinates
+                arrays = [
+                    lfp[structure][name].expand_dims('probe').assign_coords(probe=[name])
+                    for name in probe_names
+                ]
+
+                # concatenate data from the different channels or expand if there is only one probe
+                lfp3d = xr.concat(arrays, dim='probe')
+
+                tfr, tfr_freqs = compute_tfr(lfp3d.data, FS_LFP, FREQS, method='stockwell', 
+                                                n_morlet_cycle=N_CYCLES, n_jobs=N_JOBS)
+
+                print(f'TFR Shape: {tfr.shape}')
+
+                # don't average because stockwell is already doing that
+                #tfr = np.mean(tfr, axis=0) # average over channels 
+                spec = np.mean(tfr, axis=2)
+                # parameterize spectra, compute aperiodic exponent and total power
+                freq_filter = np.logical_and(tfr_freqs >= specparam_min_freq, tfr_freqs <= specparam_max_freq)
+
+                sgm = apply_specparam(spec[None,:,freq_filter], tfr_freqs[freq_filter], SPECPARAM_SETTINGS, N_JOBS)
+                print('specparam applied to LFP', flush=True)
+
+                figure_dir_name = f'figures/specparam_plots/{subj}_{session}_{structure}/'
+                os.makedirs(figure_dir_name, exist_ok=True)
+
+                sgm.plot(save_fig=True, file_name='r2_plot', file_path=figure_dir_name)
+
+                for idx in range(len(presentation_times)):
+                    res = sgm.get_model(idx)
+                    res.plot(plt_log=True, save_fig=True, file_name=f'trial_{idx}_spectrum', file_path=figure_dir_name)
+                    specparam_r_squared_list.append(res.r_squared_)
+                    specparam_error_list.append(res.error_)
+                    plt.close('all')
+
+                print(f'Num Null: {sgm.n_null_}')
+                exponent = sgm.get_params('aperiodic', 'exponent')
+                exponent_list.extend(exponent.squeeze())
+
+                spectra_flat = compute_flattened_spectra(sgm)
+                spectra_flat = [spectra_flat[idx, :] for idx in range(spectra_flat.shape[0])]
+                spectra_flat_list.extend(spectra_flat)
+
+                spectra_original = [spec[idx, :] for idx in range(spec.shape[0])]
+                spectra_original_list.extend(spectra_original)
+
+                freqs_trials = [sgm.freqs for _ in range(len(spectra_flat))]
+                freqs_list.extend(freqs_trials)
+
+                
+                # if not has_struct:
+                #     print(f'{structure} not found in subj_{subj} session_{session}')
+                #     exponent_list.extend(np.repeat(np.nan, len(presentation_times)))
+                #     spectra_flat_list.extend(np.repeat(np.nan, len(presentation_times)))
+                #     freqs_list.extend(np.repeat(np.nan, len(presentation_times)))
+                #     spectra_original_list.extend(np.repeat(np.nan, len(presentation_times)))
+                #     specparam_r_squared_list.extend(np.repeat(np.nan, len(presentation_times)))
+                #     specparam_error_list.extend(np.repeat(np.nan, len(presentation_times)))
 
         print(' ')
         print(' ')
