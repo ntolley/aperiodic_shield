@@ -12,7 +12,7 @@ import sys
 import pickle
 
 # include code path
-sys.path.append('code')
+sys.path.append('utils')
 
 # load custom shield scripts
 from shield_utils import find_animals, get_lfp_dict, downsample, align_lfp, load_animals_oi
