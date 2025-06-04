@@ -249,6 +249,7 @@ if __name__ == "__main__":
             with open(os.path.join(data_path,'results_lfp_layer', f'lfp_{subj}_{session}.pkl'), 'rb') as f:
                     lfp = pickle.load(f)
 
+
             for structure in unique_structures:
                 
                 # concatenate probes recording from same structure into 3d arrays
@@ -262,11 +263,19 @@ if __name__ == "__main__":
 
                 # concatenate data from the different channels or expand if there is only one probe
                 lfp3d = xr.concat(arrays, dim='probe')
+                lfp3d.sel(time=(lfp3d.time > toi[0]) & (lfp3d.time <= toi[1]))
+
 
                 tfr, tfr_freqs = compute_tfr(lfp3d.data, FS_LFP, FREQS, method='stockwell', 
                                                 n_morlet_cycle=N_CYCLES, n_jobs=N_JOBS)
 
-                print(f'TFR Shape: {tfr.shape}')
+                figure_dir_name = f'figures/specparam_plots/{subj}_{session}_{structure}/'
+                os.makedirs(figure_dir_name, exist_ok=True)
+                plt.pcolormesh(arrays[0].time, tfr_freqs, tfr.mean(axis=0), norm='log', shading='gouraud', rasterized=True)
+                plt.colorbar()
+                plt.xlabel('time (s)')
+                plt.ylabel('frequency (Hz)')
+                plt.savefig(f'{figure_dir_name}tfr')
 
                 # don't average because stockwell is already doing that
                 #tfr = np.mean(tfr, axis=0) # average over channels 
@@ -276,9 +285,6 @@ if __name__ == "__main__":
 
                 sgm = apply_specparam(spec[None,:,freq_filter], tfr_freqs[freq_filter], SPECPARAM_SETTINGS, N_JOBS)
                 print('specparam applied to LFP', flush=True)
-
-                figure_dir_name = f'figures/specparam_plots/{subj}_{session}_{structure}/'
-                os.makedirs(figure_dir_name, exist_ok=True)
 
                 sgm.plot(save_fig=True, file_name='r2_plot', file_path=figure_dir_name)
 

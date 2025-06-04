@@ -131,7 +131,7 @@ def plot_tfr(time, freqs, tfr, fname_out=None, title=None,
 
 def compute_tfr(lfp, fs, freqs, freq_spacing='lin', time_window_length=0.5, 
                 freq_bandwidth=4, n_jobs=-1, decim=1, output='power', 
-                method='stockwell', stockwell_width = 1, n_morlet_cycle=7, verbose=False):
+                method='stockwell', stockwell_width = .5, n_morlet_cycle=7, verbose=False):
     """
     Compute time-frequency representation (TFR) of LFP data.
 
@@ -168,7 +168,7 @@ def compute_tfr(lfp, fs, freqs, freq_spacing='lin', time_window_length=0.5,
     
     elif method == 'stockwell':
         tfr, _, freq = tfr_array_stockwell(lfp, sfreq=fs, fmin=freq[0], fmax=freq[-1], 
-                                  n_fft=int(2048*fs/1000), width=stockwell_width, decim=decim, 
+                                  n_fft=1024, width=stockwell_width, decim=decim, 
                                   return_itc=False, n_jobs=n_jobs, verbose=verbose)
 
     return tfr, freq
