@@ -92,9 +92,9 @@ if __name__ == "__main__":
 
     unique_structures = ['LGd', 'VISp']
 
-    toi = [0, 2]                # time window around flash onset
+    toi = [0, 1]                # time window around flash onset
 
-    window_duration = 1.0 # used for spike detection (should it be longer to match behavior?)
+    window_duration = toi[-1] # used for spike detection (should it be longer to match behavior?)
 
     # Define burst parameters (same as before)
     burst_params = {
@@ -108,7 +108,7 @@ if __name__ == "__main__":
 
     FS_LFP = 500 # downsampled frequency for LFP
     # spectrogram hyperparameters
-    FREQS = [2, 100, 98] # [start, stop, n_freqs] (Hz)
+    FREQS = [4, 100, 98] # [start, stop, n_freqs] (Hz)
     N_CYCLES = 5 # for Morlet decomp
     specparam_min_freq = 2
     specparam_max_freq = 100
@@ -263,7 +263,7 @@ if __name__ == "__main__":
 
                 # concatenate data from the different channels or expand if there is only one probe
                 lfp3d = xr.concat(arrays, dim='probe')
-                lfp3d.sel(time=(lfp3d.time > toi[0]) & (lfp3d.time <= toi[1]))
+                lfp3d = lfp3d.sel(time=(lfp3d.time > toi[0]) & (lfp3d.time <= toi[1]))
 
 
                 tfr, tfr_freqs = compute_tfr(lfp3d.data, FS_LFP, FREQS, method='stockwell', 
@@ -271,7 +271,7 @@ if __name__ == "__main__":
 
                 figure_dir_name = f'figures/specparam_plots/{subj}_{session}_{structure}/'
                 os.makedirs(figure_dir_name, exist_ok=True)
-                plt.pcolormesh(arrays[0].time, tfr_freqs, tfr.mean(axis=0), norm='log', shading='gouraud', rasterized=True)
+                plt.pcolormesh(lfp3d.time, tfr_freqs, tfr.mean(axis=0), norm='log', shading='gouraud', rasterized=True)
                 plt.colorbar()
                 plt.xlabel('time (s)')
                 plt.ylabel('frequency (Hz)')
@@ -300,10 +300,10 @@ if __name__ == "__main__":
                 exponent_list.extend(exponent.squeeze())
 
                 spectra_flat = compute_flattened_spectra(sgm)
-                spectra_flat = [spectra_flat[idx, :] for idx in range(spectra_flat.shape[0])]
+                spectra_flat = [row for row in spectra_flat]
                 spectra_flat_list.extend(spectra_flat)
 
-                spectra_original = [spec[idx, :] for idx in range(spec.shape[0])]
+                spectra_original = [row for row in spec]
                 spectra_original_list.extend(spectra_original)
 
                 freqs_trials = [sgm.freqs for _ in range(len(spectra_flat))]
@@ -348,3 +348,4 @@ if __name__ == "__main__":
     df = pd.DataFrame(df_dict)
 
     df.to_csv('all_features.csv')
+    df.to_pickle('all_features.pkl')
