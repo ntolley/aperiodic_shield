@@ -92,7 +92,7 @@ if __name__ == "__main__":
 
     unique_structures = ['LGd', 'VISp']
 
-    toi = [0, 1]                # time window around flash onset
+    toi = [0, 0.5]                # time window around flash onset
 
     window_duration = toi[-1] # used for spike detection (should it be longer to match behavior?)
 
@@ -108,7 +108,7 @@ if __name__ == "__main__":
 
     FS_LFP = 500 # downsampled frequency for LFP
     # spectrogram hyperparameters
-    FREQS = [4, 100, 98] # [start, stop, n_freqs] (Hz)
+    FREQS = [4, 100, 96] # [start, stop, n_freqs] (Hz)
     N_CYCLES = 5 # for Morlet decomp
     specparam_min_freq = 2
     specparam_max_freq = 100
@@ -265,6 +265,15 @@ if __name__ == "__main__":
                 lfp3d = xr.concat(arrays, dim='probe')
                 lfp3d = lfp3d.sel(time=(lfp3d.time > toi[0]) & (lfp3d.time <= toi[1]))
 
+                # zero pad
+                if lfp3d.time[-1] < 1:
+                    pad_length = int((FS_LFP-len(lfp3d.time))/2)
+
+                    # replace timevec because x array just pads on nans
+                    timevec = np.linspace(lfp3d.time[0]-(1/FS_LFP)*pad_length, lfp3d.time[-1]+(1/FS_LFP)*pad_length, len(lfp3d.time)+pad_length*2)
+                    lfp3d = lfp3d.pad(time=(pad_length,pad_length), mode='reflect')
+                    lfp3d['time'] = timevec
+
 
                 tfr, tfr_freqs = compute_tfr(lfp3d.data, FS_LFP, FREQS, method='stockwell', 
                                                 n_morlet_cycle=N_CYCLES, n_jobs=N_JOBS)
@@ -347,5 +356,5 @@ if __name__ == "__main__":
         print(f'{key}: {len(value)}')
     df = pd.DataFrame(df_dict)
 
-    df.to_csv('all_features.csv')
-    df.to_pickle('all_features.pkl')
+    df.to_csv('all_features_500ms.csv')
+    df.to_pickle('all_features_500ms.pkl')

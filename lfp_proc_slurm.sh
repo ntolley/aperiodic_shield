@@ -2,7 +2,7 @@
 #SBATCH -J lfp_proc
 #SBATCH -t 60:00
 #SBATCH --mem=80G
-#SBATCH --array=0-5
+#SBATCH --ntasks=63
 
 # Specify an output file
 # %j is a special variable that is replaced by the JobID when 
